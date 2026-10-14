@@ -1,0 +1,7 @@
+# Saved Claude.ai conversation export (personal, not part of the app)
+*.htm
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/

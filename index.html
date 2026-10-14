@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Piso</title>
+<style>
+  :root {
+    --bg: #f6f7f5; --card: #ffffff; --ink: #14201e; --muted: #5d6b68;
+    --brand: #0f766e; --brand-ink: #ffffff; --income: #15803d; --expense: #b91c1c;
+    --line: #dfe5e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e1513; --card: #17211e; --ink: #e8efec; --muted: #94a5a0; --brand: #2dd4bf; --brand-ink: #062a25; --income: #4ade80; --expense: #f87171; --line: #263430; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.4 system-ui, sans-serif; }
+  main { max-width: 480px; margin: 0 auto; padding: 16px 16px 40px; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 8px 0 16px; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: .5px; }
+  button { font: inherit; cursor: pointer; }
+  .ghost { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 10px; padding: 8px 12px; }
+  .mic-wrap { display: grid; place-items: center; padding: 28px 0 8px; }
+  #mic { width: 132px; height: 132px; border-radius: 50%; border: 0; background: var(--brand); color: var(--brand-ink); font-size: 52px; box-shadow: 0 8px 24px rgba(15,118,110,.35); }
+  #mic.listening { animation: pulse 1.1s infinite; background: var(--expense); color: #fff; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(185,28,28,.5);} 100% { box-shadow: 0 0 0 28px rgba(185,28,28,0);} }
+  #hint { text-align: center; color: var(--muted); min-height: 1.4em; margin: 10px 0 18px; }
+  .typed { display: flex; gap: 8px; margin-bottom: 18px; }
+  .typed input { flex: 1; }
+  input, select { font: inherit; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .primary { background: var(--brand); color: var(--brand-ink); border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--muted); font-weight: 600; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .actions { display: flex; gap: 10px; margin-top: 6px; }
+  .actions button { flex: 1; }
+  .type-income { color: var(--income); } .type-expense { color: var(--expense); }
+  #log { list-style: none; margin: 0; padding: 0; }
+  #log li { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  #log li:first-child { border-top: 0; }
+  #log small { color: var(--muted); display: block; }
+  #status { font-size: 13px; color: var(--muted); text-align: center; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Piso</h1>
+    <div>
+      <button class="ghost" id="undoBtn">Undo last</button>
+      <button class="ghost" id="settingsBtn">Settings</button>
+    </div>
+  </header>
+
+  <div class="mic-wrap"><button id="mic" aria-label="Tap to speak">🎤</button></div>
+  <div id="hint">Tap the mic and say “Minus 29 for coffee”</div>
+
+  <form class="typed" id="typedForm">
+    <input id="typed" placeholder="…or type it: plus 6890.90 into BDO" autocomplete="off">
+    <button class="primary" type="submit">Go</button>
+  </form>
+
+  <section class="card hidden" id="confirm">
+    <h2>Confirm entry</h2>
+    <div class="row">
+      <div><label for="fType">Type</label>
+        <select id="fType"><option>Expense</option><option>Income</option></select></div>
+      <div><label for="fAmount">Amount (₱)</label>
+        <input id="fAmount" inputmode="decimal"></div>
+    </div>
+    <div class="row">
+      <div><label for="fAccount">Account</label><select id="fAccount"></select></div>
+      <div><label for="fCategory">Category</label><select id="fCategory"></select></div>
+    </div>
+    <label for="fNote">Note</label>
+    <input id="fNote" style="margin-bottom:10px">
+    <div class="actions">
+      <button class="ghost" id="cancelBtn" type="button">Cancel</button>
+      <button class="primary" id="saveBtn" type="button">Save</button>
+    </div>
+  </section>
+
+  <section class="card hidden" id="settings">
+    <h2>Settings</h2>
+    <label for="sUrl">Apps Script web app URL</label>
+    <input id="sUrl" placeholder="https://script.google.com/macros/s/.../exec" style="margin-bottom:10px">
+    <label for="sToken">Secret token</label>
+    <input id="sToken" type="password" style="margin-bottom:10px">
+    <label for="sAccounts">Accounts (comma separated)</label>
+    <input id="sAccounts" style="margin-bottom:10px">
+    <label for="sDefault">Default account</label>
+    <input id="sDefault" style="margin-bottom:10px">
+    <div class="actions">
+      <button class="ghost" id="settingsClose" type="button">Close</button>
+      <button class="primary" id="settingsSave" type="button">Save settings</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Recent</h2>
+    <ul id="log"></ul>
+  </section>
+  <div id="status"></div>
+</main>
+
+<script>
+/* ---------- Config you can edit ---------- */
+const DEFAULT_ACCOUNTS = ['BDO', 'GCash', 'Maya', 'Cash'];
+const ACCOUNT_ALIASES = {            // spoken form -> account name
+  'bdo': 'BDO', 'b d o': 'BDO',
+  'gcash': 'GCash', 'g cash': 'GCash', 'gee cash': 'GCash',
+  'maya': 'Maya', 'paymaya': 'Maya', 'pay maya': 'Maya',
+  'cash': 'Cash'
+};
+const CATEGORIES = ['Food', 'Transport', 'Load/Bills', 'Shopping', 'Health', 'Entertainment', 'Savings', 'Salary', 'Other Income', 'Other'];
+const CATEGORY_KEYWORDS = {          // category -> words that trigger it
+  'Food': ['coffee', 'lunch', 'dinner', 'breakfast', 'snack', 'food', 'milk tea', 'jollibee', 'mcdo', 'grocery', 'groceries', 'rice', 'water'],
+  'Transport': ['jeep', 'jeepney', 'taxi', 'grab', 'fare', 'gas', 'gasoline', 'bus', 'tricycle', 'parking', 'toll'],
+  'Load/Bills': ['load', 'dito', 'globe', 'smart', 'internet', 'wifi', 'electric', 'electricity', 'water bill', 'bill', 'bills', 'rent', 'subscription'],
+  'Shopping': ['shopee', 'lazada', 'clothes', 'shoes', 'shopping'],
+  'Health': ['medicine', 'doctor', 'clinic', 'vitamins', 'hospital'],
+  'Entertainment': ['game', 'games', 'netflix', 'movie', 'spotify', 'steam', 'top up', 'topup'],
+  'Savings': ['savings', 'save', 'transfer'],
+  'Salary': ['salary', 'sahod', 'payroll', 'payday'],
+  'Other Income': ['refund', 'gift', 'bonus', 'allowance', 'sold', 'sale', 'freelance']
+};
+const INCOME_WORDS = ['plus', 'add', 'added', 'income', 'received', 'deposit', 'earned', 'got', 'salary'];
+const EXPENSE_WORDS = ['minus', 'less', 'spent', 'expense', 'paid', 'bought', 'withdraw', 'deduct'];
+
+/* ---------- Storage ---------- */
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+};
+let cfg = {
+  url: store.get('piso.url', ''),
+  token: store.get('piso.token', ''),
+  accounts: store.get('piso.accounts', DEFAULT_ACCOUNTS),
+  defaultAccount: store.get('piso.defaultAccount', 'Cash')
+};
+let queue = store.get('piso.queue', []);   // unsent entries (offline)
+let recent = store.get('piso.recent', []); // local display log
+
+/* ---------- Parser ---------- */
+function parseCommand(raw) {
+  const text = raw.toLowerCase().replace(/₱|php|pesos?|piso/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = text.split(' ');
+
+  // type
+  let type = 'Expense', typeFound = false;
+  for (const w of words) {
+    if (INCOME_WORDS.includes(w)) { type = 'Income'; typeFound = true; break; }
+    if (EXPENSE_WORDS.includes(w)) { type = 'Expense'; typeFound = true; break; }
+  }
+
+  // amount: "6,890.90", "6890.90", "29", "1.5k"
+  let amount = null;
+  const m = text.match(/(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*(k\b)?/);
+  if (m) {
+    amount = parseFloat((m[1].replace(/,/g, '') + (m[2] || '')));
+    if (m[3]) amount *= 1000;
+  }
+
+  // account: longest alias match anywhere
+  let account = null;
+  const aliases = Object.keys(ACCOUNT_ALIASES).sort((a, b) => b.length - a.length);
+  for (const a of aliases) {
+    if (new RegExp('\\b' + a + '\\b').test(text) && cfg.accounts.includes(ACCOUNT_ALIASES[a])) { account = ACCOUNT_ALIASES[a]; break; }
+  }
+  if (!account) {
+    for (const acc of cfg.accounts) {
+      if (new RegExp('\\b' + acc.toLowerCase() + '\\b').test(text)) { account = acc; break; }
+    }
+  }
+
+  // note: text after "for"; else leftover text after "into/from/to <account>"
+  let note = '';
+  const forIdx = text.search(/\bfor\b/);
+  if (forIdx >= 0) note = text.slice(forIdx + 4).trim();
+  note = note.replace(/\b(into|from|to|in|on)\s+(bdo|gcash|g cash|maya|paymaya|cash)\b/g, '').trim();
+  if (note) note = note.replace(/\b\w/g, (c) => c.toUpperCase());
+
+  // category
+  const haystack = (note || text).toLowerCase();
+  let category = type === 'Income' ? 'Other Income' : 'Other';
+  outer: for (const [cat, kws] of Object.entries(CATEGORY_KEYWORDS)) {
+    for (const kw of kws) {
+      if (new RegExp('\\b' + kw + '\\b').test(haystack)) { category = cat; break outer; }
+    }
+  }
+  if (type === 'Income' && !['Salary', 'Other Income'].includes(category)) category = 'Other Income';
+
+  return { type, typeFound, amount, account: account || cfg.defaultAccount, category, note, raw };
+}
+
+/* ---------- UI ---------- */
+function fillSelect(sel, items, value) {
+  sel.innerHTML = '';
+  items.forEach((i) => { const o = document.createElement('option'); o.textContent = i; sel.appendChild(o); });
+  if (value && items.includes(value)) sel.value = value;
+}
+function peso(n) { return '₱' + Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function setStatus(msg) { $('status').textContent = msg || ''; }
+
+function showConfirm(p) {
+  if (!p.amount) { $('hint').textContent = 'Couldn’t find an amount in: “' + p.raw + '”. Try again.'; return; }
+  $('fType').value = p.type;
+  $('fAmount').value = p.amount;
+  fillSelect($('fAccount'), cfg.accounts, p.account);
+  fillSelect($('fCategory'), CATEGORIES, p.category);
+  $('fNote').value = p.note;
+  $('confirm').dataset.raw = p.raw;
+  $('confirm').classList.remove('hidden');
+  $('hint').textContent = '“' + p.raw + '”';
+}
+function renderLog() {
+  const ul = $('log'); ul.innerHTML = '';
+  if (!recent.length) { ul.innerHTML = '<li><span>No entries yet</span></li>'; return; }
+  recent.slice(0, 8).forEach((t) => {
+    const li = document.createElement('li');
+    const left = document.createElement('span');
+    left.textContent = (t.note || t.category) ;
+    const small = document.createElement('small');
+    small.textContent = t.account + ' · ' + t.category + (t.pending ? ' · queued' : '');
+    left.appendChild(small);
+    const right = document.createElement('strong');
+    right.className = t.type === 'Income' ? 'type-income' : 'type-expense';
+    right.textContent = (t.type === 'Income' ? '+' : '−') + peso(t.amount);
+    li.append(left, right); ul.appendChild(li);
+  });
+}
+
+/* ---------- Network ---------- */
+async function post(payload) {
+  if (!cfg.url || !cfg.token) throw new Error('Set URL and token in Settings first');
+  const res = await fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ token: cfg.token, ...payload })
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Server error');
+  return data;
+}
+async function flushQueue() {
+  if (!queue.length || !navigator.onLine || !cfg.url) return;
+  const remaining = [];
+  for (const tx of queue) {
+    try { await post({ action: 'add', tx }); recent.forEach((r) => { if (r.id === tx.id) delete r.pending; }); }
+    catch { remaining.push(tx); }
+  }
+  queue = remaining; store.set('piso.queue', queue); store.set('piso.recent', recent); renderLog();
+  setStatus(queue.length ? queue.length + ' entries still queued' : '');
+}
+
+async function saveEntry() {
+  const tx = {
+    id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    type: $('fType').value,
+    amount: parseFloat($('fAmount').value),
+    account: $('fAccount').value,
+    category: $('fCategory').value,
+    note: $('fNote').value.trim(),
+    raw: $('confirm').dataset.raw || ''
+  };
+  if (!(tx.amount > 0)) { setStatus('Enter a valid amount'); return; }
+  $('saveBtn').disabled = true;
+  try {
+    await post({ action: 'add', tx });
+    recent.unshift(tx);
+    setStatus('Saved ' + peso(tx.amount));
+  } catch (err) {
+    if (!cfg.url || !cfg.token) { setStatus(err.message); $('saveBtn').disabled = false; return; }
+    queue.push(tx); store.set('piso.queue', queue);
+    recent.unshift({ ...tx, pending: true });
+    setStatus('Offline or failed — queued, will retry. (' + err.message + ')');
+  }
+  store.set('piso.recent', recent.slice(0, 30));
+  $('confirm').classList.add('hidden');
+  $('hint').textContent = 'Tap the mic and say “Minus 29 for coffee”';
+  $('saveBtn').disabled = false;
+  renderLog();
+}
+
+async function undoLast() {
+  try {
+    await post({ action: 'undo' });
+    recent.shift(); store.set('piso.recent', recent); renderLog();
+    setStatus('Last entry removed');
+  } catch (err) { setStatus('Undo failed: ' + err.message); }
+}
+
+/* ---------- Voice ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+function startListening() {
+  if (!SR) { $('hint').textContent = 'Voice not supported here — use the text box or your keyboard mic.'; return; }
+  rec = new SR();
+  rec.lang = 'en-PH';
+  rec.interimResults = true;
+  rec.maxAlternatives = 1;
+  rec.onstart = () => { $('mic').classList.add('listening'); $('hint').textContent = 'Listening…'; };
+  rec.onresult = (e) => {
+    const r = e.results[e.results.length - 1];
+    $('hint').textContent = r[0].transcript;
+    if (r.isFinal) showConfirm(parseCommand(r[0].transcript));
+  };
+  rec.onerror = (e) => { $('hint').textContent = 'Mic error: ' + e.error; };
+  rec.onend = () => $('mic').classList.remove('listening');
+  rec.start();
+}
+
+/* ---------- Wiring ---------- */
+$('mic').addEventListener('click', () => {
+  if ($('mic').classList.contains('listening') && rec) rec.stop(); else startListening();
+});
+$('typedForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const v = $('typed').value.trim();
+  if (v) { showConfirm(parseCommand(v)); $('typed').value = ''; }
+});
+$('saveBtn').addEventListener('click', saveEntry);
+$('cancelBtn').addEventListener('click', () => { $('confirm').classList.add('hidden'); $('hint').textContent = 'Cancelled'; });
+$('undoBtn').addEventListener('click', undoLast);
+
+$('settingsBtn').addEventListener('click', () => {
+  $('sUrl').value = cfg.url; $('sToken').value = cfg.token;
+  $('sAccounts').value = cfg.accounts.join(', '); $('sDefault').value = cfg.defaultAccount;
+  $('settings').classList.toggle('hidden');
+});
+$('settingsClose').addEventListener('click', () => $('settings').classList.add('hidden'));
+$('settingsSave').addEventListener('click', () => {
+  cfg.url = $('sUrl').value.trim();
+  cfg.token = $('sToken').value.trim();
+  cfg.accounts = $('sAccounts').value.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!cfg.accounts.length) cfg.accounts = DEFAULT_ACCOUNTS;
+  cfg.defaultAccount = cfg.accounts.includes($('sDefault').value.trim()) ? $('sDefault').value.trim() : cfg.accounts[0];
+  store.set('piso.url', cfg.url); store.set('piso.token', cfg.token);
+  store.set('piso.accounts', cfg.accounts); store.set('piso.defaultAccount', cfg.defaultAccount);
+  $('settings').classList.add('hidden');
+  setStatus('Settings saved'); flushQueue();
+});
+
+window.addEventListener('online', flushQueue);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if (!cfg.url || !cfg.token) { $('settings').classList.remove('hidden'); $('sUrl').value = cfg.url; $('sToken').value = cfg.token; $('sAccounts').value = cfg.accounts.join(', '); $('sDefault').value = cfg.defaultAccount; }
+renderLog(); flushQueue();
+</script>
+</body>
+</html>
