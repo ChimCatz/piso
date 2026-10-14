@@ -1,0 +1,11 @@
+{
+  "name": "piso",
+  "private": true,
+  "description": "Voice income & expense tracker: PWA + Google Apps Script + Google Sheets",
+  "scripts": {
+    "test": "node --test",
+    "smoke": "node scripts/smoke.mjs",
+    "audit": "node scripts/audit.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

@@ -38,7 +38,7 @@
   label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
   .actions { display: flex; gap: 10px; margin-top: 6px; }
   .actions button { flex: 1; }
-  .type-income { color: var(--income); } .type-expense { color: var(--expense); }
+  .type-income { color: var(--income); } .type-expense { color: var(--expense); } .type-transfer { color: var(--muted); }
   #log { list-style: none; margin: 0; padding: 0; }
   #log li { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14px; }
   #log li:first-child { border-top: 0; }
@@ -69,13 +69,14 @@
     <h2>Confirm entry</h2>
     <div class="row">
       <div><label for="fType">Type</label>
-        <select id="fType"><option>Expense</option><option>Income</option></select></div>
+        <select id="fType"><option>Expense</option><option>Income</option><option>Transfer</option></select></div>
       <div><label for="fAmount">Amount (₱)</label>
         <input id="fAmount" inputmode="decimal"></div>
     </div>
     <div class="row">
-      <div><label for="fAccount">Account</label><select id="fAccount"></select></div>
-      <div><label for="fCategory">Category</label><select id="fCategory"></select></div>
+      <div><label for="fAccount" id="fAccountLabel">Account</label><select id="fAccount"></select></div>
+      <div id="catWrap"><label for="fCategory">Category</label><select id="fCategory"></select></div>
+      <div id="toWrap" class="hidden"><label for="fTo">To account</label><select id="fTo"></select></div>
     </div>
     <label for="fNote">Note</label>
     <input id="fNote" style="margin-bottom:10px">
@@ -95,6 +96,14 @@
     <input id="sAccounts" style="margin-bottom:10px">
     <label for="sDefault">Default account</label>
     <input id="sDefault" style="margin-bottom:10px">
+    <label for="sAliases">Nicknames (optional): what you say = account</label>
+    <input id="sAliases" placeholder="bpi family=BPI, ewallet=GCash" style="margin-bottom:10px">
+    <label for="sLang">Speech language</label>
+    <select id="sLang" style="margin-bottom:10px">
+      <option value="en-PH">English (Philippines)</option>
+      <option value="fil-PH">Filipino</option>
+      <option value="en-US">English (US)</option>
+    </select>
     <div class="actions">
       <button class="ghost" id="settingsClose" type="button">Close</button>
       <button class="primary" id="settingsSave" type="button">Save settings</button>
@@ -108,29 +117,11 @@
   <div id="status"></div>
 </main>
 
+<script src="parser.js"></script>
 <script>
-/* ---------- Config you can edit ---------- */
-const DEFAULT_ACCOUNTS = ['BDO', 'GCash', 'Maya', 'Cash'];
-const ACCOUNT_ALIASES = {            // spoken form -> account name
-  'bdo': 'BDO', 'b d o': 'BDO',
-  'gcash': 'GCash', 'g cash': 'GCash', 'gee cash': 'GCash',
-  'maya': 'Maya', 'paymaya': 'Maya', 'pay maya': 'Maya',
-  'cash': 'Cash'
-};
-const CATEGORIES = ['Food', 'Transport', 'Load/Bills', 'Shopping', 'Health', 'Entertainment', 'Savings', 'Salary', 'Other Income', 'Other'];
-const CATEGORY_KEYWORDS = {          // category -> words that trigger it
-  'Food': ['coffee', 'lunch', 'dinner', 'breakfast', 'snack', 'food', 'milk tea', 'jollibee', 'mcdo', 'grocery', 'groceries', 'rice', 'water'],
-  'Transport': ['jeep', 'jeepney', 'taxi', 'grab', 'fare', 'gas', 'gasoline', 'bus', 'tricycle', 'parking', 'toll'],
-  'Load/Bills': ['load', 'dito', 'globe', 'smart', 'internet', 'wifi', 'electric', 'electricity', 'water bill', 'bill', 'bills', 'rent', 'subscription'],
-  'Shopping': ['shopee', 'lazada', 'clothes', 'shoes', 'shopping'],
-  'Health': ['medicine', 'doctor', 'clinic', 'vitamins', 'hospital'],
-  'Entertainment': ['game', 'games', 'netflix', 'movie', 'spotify', 'steam', 'top up', 'topup'],
-  'Savings': ['savings', 'save', 'transfer'],
-  'Salary': ['salary', 'sahod', 'payroll', 'payday'],
-  'Other Income': ['refund', 'gift', 'bonus', 'allowance', 'sold', 'sale', 'freelance']
-};
-const INCOME_WORDS = ['plus', 'add', 'added', 'income', 'received', 'deposit', 'earned', 'got', 'salary'];
-const EXPENSE_WORDS = ['minus', 'less', 'spent', 'expense', 'paid', 'bought', 'withdraw', 'deduct'];
+/* Words, accounts and categories live in parser.js */
+const P = window.PisoParser;
+const HINT = 'Tap the mic and say “Minus 29 for coffee”';
 
 /* ---------- Storage ---------- */
 const $ = (id) => document.getElementById(id);
@@ -141,67 +132,17 @@ const store = {
 let cfg = {
   url: store.get('piso.url', ''),
   token: store.get('piso.token', ''),
-  accounts: store.get('piso.accounts', DEFAULT_ACCOUNTS),
-  defaultAccount: store.get('piso.defaultAccount', 'Cash')
+  accounts: store.get('piso.accounts', P.DEFAULT_ACCOUNTS),
+  defaultAccount: store.get('piso.defaultAccount', 'Cash'),
+  aliases: store.get('piso.aliases', ''),
+  lang: store.get('piso.lang', 'en-PH')
 };
-let queue = store.get('piso.queue', []);   // unsent entries (offline)
-let recent = store.get('piso.recent', []); // local display log
+let queue = store.get('piso.queue', []);     // unsent entries (offline)
+let recent = store.get('piso.recent', []);   // local display log
+let learned = store.get('piso.learned', {}); // your category corrections: note -> category
 
-/* ---------- Parser ---------- */
-function parseCommand(raw) {
-  const text = raw.toLowerCase().replace(/₱|php|pesos?|piso/g, ' ').replace(/\s+/g, ' ').trim();
-  const words = text.split(' ');
-
-  // type
-  let type = 'Expense', typeFound = false;
-  // Chrome often turns "plus 500" / "minus 29" into "+ 500" / "-29"
-  if (/(^|\s)\+\s*\d/.test(text)) { type = 'Income'; typeFound = true; }
-  else if (/(^|\s)[-−–]\s*\d/.test(text)) { type = 'Expense'; typeFound = true; }
-  if (!typeFound) for (const w of words) {
-    if (INCOME_WORDS.includes(w)) { type = 'Income'; typeFound = true; break; }
-    if (EXPENSE_WORDS.includes(w)) { type = 'Expense'; typeFound = true; break; }
-  }
-
-  // amount: "6,890.90", "6890.90", "29", "1.5k"
-  let amount = null;
-  const m = text.match(/(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*(k\b)?/);
-  if (m) {
-    amount = parseFloat((m[1].replace(/,/g, '') + (m[2] || '')));
-    if (m[3]) amount *= 1000;
-  }
-
-  // account: longest alias match anywhere
-  let account = null;
-  const aliases = Object.keys(ACCOUNT_ALIASES).sort((a, b) => b.length - a.length);
-  for (const a of aliases) {
-    if (new RegExp('\\b' + a + '\\b').test(text) && cfg.accounts.includes(ACCOUNT_ALIASES[a])) { account = ACCOUNT_ALIASES[a]; break; }
-  }
-  if (!account) {
-    for (const acc of cfg.accounts) {
-      if (new RegExp('\\b' + acc.toLowerCase() + '\\b').test(text)) { account = acc; break; }
-    }
-  }
-
-  // note: text after "for"; else leftover text after "into/from/to <account>"
-  let note = '';
-  const forIdx = text.search(/\bfor\b/);
-  if (forIdx >= 0) note = text.slice(forIdx + 4).trim();
-  note = note.replace(/\b(into|from|to|in|on)\s+(bdo|gcash|g cash|maya|paymaya|cash)\b/g, '').trim();
-  if (note) note = note.replace(/\b\w/g, (c) => c.toUpperCase());
-
-  // category: longest keyword wins, so "water bill" beats "water"
-  const haystack = (note || text).toLowerCase();
-  let category = type === 'Income' ? 'Other Income' : 'Other';
-  const keywords = Object.entries(CATEGORY_KEYWORDS)
-    .flatMap(([cat, kws]) => kws.map((kw) => [kw, cat]))
-    .sort((a, b) => b[0].length - a[0].length);
-  for (const [kw, cat] of keywords) {
-    if (new RegExp('\\b' + kw + '\\b').test(haystack)) { category = cat; break; }
-  }
-  if (type === 'Income' && !['Salary', 'Other Income'].includes(category)) category = 'Other Income';
-
-  return { type, typeFound, amount, account: account || cfg.defaultAccount, category, note, raw };
-}
+const parseOpts = () => ({ accounts: cfg.accounts, defaultAccount: cfg.defaultAccount, aliases: P.parseAliases(cfg.aliases), learned });
+const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 /* ---------- UI ---------- */
 function fillSelect(sel, items, value) {
@@ -212,14 +153,24 @@ function fillSelect(sel, items, value) {
 function peso(n) { return '₱' + Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function setStatus(msg) { $('status').textContent = msg || ''; }
 
+function syncTypeUI() {
+  const transfer = $('fType').value === 'Transfer';
+  $('catWrap').classList.toggle('hidden', transfer);
+  $('toWrap').classList.toggle('hidden', !transfer);
+  $('fAccountLabel').textContent = transfer ? 'From account' : 'Account';
+}
+
 function showConfirm(p) {
-  if (!p.amount) { $('hint').textContent = 'Couldn’t find an amount in: “' + p.raw + '”. Try again.'; return; }
+  if (!p || !p.amount) { $('hint').textContent = 'Couldn’t find an amount in: “' + (p ? p.raw : '') + '”. Try again.'; return; }
   $('fType').value = p.type;
   $('fAmount').value = p.amount;
   fillSelect($('fAccount'), cfg.accounts, p.account);
-  fillSelect($('fCategory'), CATEGORIES, p.category);
+  fillSelect($('fTo'), cfg.accounts, p.toAccount || cfg.accounts.find((a) => a !== p.account));
+  fillSelect($('fCategory'), P.CATEGORIES, p.type === 'Transfer' ? 'Other' : p.category);
   $('fNote').value = p.note;
   $('confirm').dataset.raw = p.raw;
+  $('confirm').dataset.suggested = $('fCategory').value;
+  syncTypeUI();
   $('confirm').classList.remove('hidden');
   $('hint').textContent = '“' + p.raw + '”';
 }
@@ -227,15 +178,16 @@ function renderLog() {
   const ul = $('log'); ul.innerHTML = '';
   if (!recent.length) { ul.innerHTML = '<li><span>No entries yet</span></li>'; return; }
   recent.slice(0, 8).forEach((t) => {
+    const transfer = t.type === 'Transfer';
     const li = document.createElement('li');
     const left = document.createElement('span');
-    left.textContent = (t.note || t.category) ;
+    left.textContent = t.note || (transfer ? 'Transfer' : t.category);
     const small = document.createElement('small');
-    small.textContent = t.account + ' · ' + t.category + (t.pending ? ' · queued' : '');
+    small.textContent = (transfer ? t.account + ' → ' + t.toAccount : t.account + ' · ' + t.category) + (t.pending ? ' · queued' : '');
     left.appendChild(small);
     const right = document.createElement('strong');
-    right.className = t.type === 'Income' ? 'type-income' : 'type-expense';
-    right.textContent = (t.type === 'Income' ? '+' : '−') + peso(t.amount);
+    right.className = transfer ? 'type-transfer' : t.type === 'Income' ? 'type-income' : 'type-expense';
+    right.textContent = (transfer ? '⇄ ' : t.type === 'Income' ? '+' : '−') + peso(t.amount);
     li.append(left, right); ul.appendChild(li);
   });
 }
@@ -256,6 +208,7 @@ async function flushQueue() {
   if (!queue.length || !navigator.onLine || !cfg.url) return;
   const remaining = [];
   for (const tx of queue) {
+    // safe to resend: the sheet skips an ID it already has
     try { await post({ action: 'add', tx }); recent.forEach((r) => { if (r.id === tx.id) delete r.pending; }); }
     catch { remaining.push(tx); }
   }
@@ -263,17 +216,28 @@ async function flushQueue() {
   setStatus(queue.length ? queue.length + ' entries still queued' : '');
 }
 
+// When you fix the category by hand, remember it for next time ("ulam" -> Food)
+function learn(tx) {
+  if (tx.type === 'Transfer' || !tx.note || tx.category === $('confirm').dataset.suggested) return;
+  learned[P.learnKey(tx.note)] = tx.category;
+  store.set('piso.learned', learned);
+}
+
 async function saveEntry() {
+  const type = $('fType').value;
   const tx = {
-    id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-    type: $('fType').value,
+    id: newId(),
+    type,
     amount: parseFloat($('fAmount').value),
     account: $('fAccount').value,
-    category: $('fCategory').value,
+    category: type === 'Transfer' ? 'Transfer' : $('fCategory').value,
     note: $('fNote').value.trim(),
     raw: $('confirm').dataset.raw || ''
   };
+  if (type === 'Transfer') tx.toAccount = $('fTo').value;
   if (!(tx.amount > 0)) { setStatus('Enter a valid amount'); return; }
+  if (type === 'Transfer' && tx.toAccount === tx.account) { setStatus('Pick two different accounts for a transfer'); return; }
+  learn(tx);
   $('saveBtn').disabled = true;
   try {
     await post({ action: 'add', tx });
@@ -287,17 +251,29 @@ async function saveEntry() {
   }
   store.set('piso.recent', recent.slice(0, 30));
   $('confirm').classList.add('hidden');
-  $('hint').textContent = 'Tap the mic and say “Minus 29 for coffee”';
+  $('hint').textContent = HINT;
   $('saveBtn').disabled = false;
   renderLog();
 }
 
+// Removes exactly the newest entry in Recent, by its ID (both rows of a transfer)
 async function undoLast() {
+  const last = recent[0];
+  if (!last) { setStatus('Nothing to undo'); return; }
+  if (!confirm('Remove “' + (last.note || last.category) + '” ' + peso(last.amount) + '?')) return;
+  const drop = (msg) => { recent.shift(); store.set('piso.recent', recent); renderLog(); setStatus(msg); };
+  if (last.pending) {
+    queue = queue.filter((q) => q.id !== last.id); store.set('piso.queue', queue);
+    drop('Queued entry removed');
+    return;
+  }
   try {
-    await post({ action: 'undo' });
-    recent.shift(); store.set('piso.recent', recent); renderLog();
-    setStatus('Last entry removed');
-  } catch (err) { setStatus('Undo failed: ' + err.message); }
+    await post({ action: 'undo', id: last.id });
+    drop('Last entry removed');
+  } catch (err) {
+    if (/not found/.test(err.message)) drop('That entry isn’t in the sheet any more, removed it from this list');
+    else setStatus('Undo failed: ' + err.message);
+  }
 }
 
 /* ---------- Voice ---------- */
@@ -306,14 +282,14 @@ let rec = null;
 function startListening() {
   if (!SR) { $('hint').textContent = 'Voice not supported here — use the text box or your keyboard mic.'; return; }
   rec = new SR();
-  rec.lang = 'en-PH';
+  rec.lang = cfg.lang || 'en-PH';
   rec.interimResults = true;
-  rec.maxAlternatives = 1;
+  rec.maxAlternatives = 5; // several guesses; the parser keeps the one that makes most sense
   rec.onstart = () => { $('mic').classList.add('listening'); $('hint').textContent = 'Listening…'; };
   rec.onresult = (e) => {
     const r = e.results[e.results.length - 1];
     $('hint').textContent = r[0].transcript;
-    if (r.isFinal) showConfirm(parseCommand(r[0].transcript));
+    if (r.isFinal) showConfirm(P.pickBest(Array.from(r, (a) => a.transcript), parseOpts()));
   };
   rec.onerror = (e) => { $('hint').textContent = 'Mic error: ' + e.error; };
   rec.onend = () => $('mic').classList.remove('listening');
@@ -327,39 +303,44 @@ $('mic').addEventListener('click', () => {
 $('typedForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const v = $('typed').value.trim();
-  if (v) { showConfirm(parseCommand(v)); $('typed').value = ''; }
+  if (v) { showConfirm(P.parse(v, parseOpts())); $('typed').value = ''; }
 });
 $('fType').addEventListener('change', () => {
   // keep the fallback category in step when the type is switched by hand
   const c = $('fCategory');
   if ($('fType').value === 'Income' && c.value === 'Other') c.value = 'Other Income';
   if ($('fType').value === 'Expense' && c.value === 'Other Income') c.value = 'Other';
+  syncTypeUI();
 });
 $('saveBtn').addEventListener('click', saveEntry);
 $('cancelBtn').addEventListener('click', () => { $('confirm').classList.add('hidden'); $('hint').textContent = 'Cancelled'; });
 $('undoBtn').addEventListener('click', undoLast);
 
-$('settingsBtn').addEventListener('click', () => {
+function fillSettings() {
   $('sUrl').value = cfg.url; $('sToken').value = cfg.token;
   $('sAccounts').value = cfg.accounts.join(', '); $('sDefault').value = cfg.defaultAccount;
-  $('settings').classList.toggle('hidden');
-});
+  $('sAliases').value = cfg.aliases; $('sLang').value = cfg.lang;
+}
+$('settingsBtn').addEventListener('click', () => { fillSettings(); $('settings').classList.toggle('hidden'); });
 $('settingsClose').addEventListener('click', () => $('settings').classList.add('hidden'));
 $('settingsSave').addEventListener('click', () => {
   cfg.url = $('sUrl').value.trim();
   cfg.token = $('sToken').value.trim();
   cfg.accounts = $('sAccounts').value.split(',').map((s) => s.trim()).filter(Boolean);
-  if (!cfg.accounts.length) cfg.accounts = DEFAULT_ACCOUNTS;
+  if (!cfg.accounts.length) cfg.accounts = P.DEFAULT_ACCOUNTS;
   cfg.defaultAccount = cfg.accounts.includes($('sDefault').value.trim()) ? $('sDefault').value.trim() : cfg.accounts[0];
+  cfg.aliases = $('sAliases').value.trim();
+  cfg.lang = $('sLang').value;
   store.set('piso.url', cfg.url); store.set('piso.token', cfg.token);
   store.set('piso.accounts', cfg.accounts); store.set('piso.defaultAccount', cfg.defaultAccount);
+  store.set('piso.aliases', cfg.aliases); store.set('piso.lang', cfg.lang);
   $('settings').classList.add('hidden');
   setStatus('Settings saved'); flushQueue();
 });
 
 window.addEventListener('online', flushQueue);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-if (!cfg.url || !cfg.token) { $('settings').classList.remove('hidden'); $('sUrl').value = cfg.url; $('sToken').value = cfg.token; $('sAccounts').value = cfg.accounts.join(', '); $('sDefault').value = cfg.defaultAccount; }
+if (!cfg.url || !cfg.token) { fillSettings(); $('settings').classList.remove('hidden'); }
 renderLog(); flushQueue();
 </script>
 </body>

@@ -7,6 +7,8 @@
 // The secret token lives in Script Properties (key TOKEN), never in this file,
 // so the repo can stay public. setupSheets() creates one if it's missing.
 const SHEET_NAME = 'Transactions';
+const HEADERS = ['Date', 'Time', 'Type', 'Amount', 'Account', 'Category', 'Note', 'Raw text', 'ID'];
+const ID_COL = 9;
 
 function getToken_() {
   return PropertiesService.getScriptProperties().getProperty('TOKEN');
@@ -21,7 +23,6 @@ function ensureToken_() {
   }
   return token;
 }
-const HEADERS = ['Date', 'Time', 'Type', 'Amount', 'Account', 'Category', 'Note', 'Raw text'];
 
 function getSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -31,6 +32,8 @@ function getSheet_() {
     sh.appendRow(HEADERS);
     sh.setFrozenRows(1);
     sh.getRange(1, 1, 1, HEADERS.length).setFontWeight('bold');
+  } else if (sh.getRange(1, ID_COL).getValue() !== 'ID') {
+    sh.getRange(1, ID_COL).setValue('ID').setFontWeight('bold'); // sheets made before IDs existed
   }
   return sh;
 }
@@ -46,6 +49,17 @@ function json_(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+// Row numbers whose ID column equals id (a transfer has two)
+function findRows_(sh, id) {
+  const last = sh.getLastRow();
+  if (!id || last < 2) return [];
+  const rows = [];
+  sh.getRange(2, ID_COL, last - 1, 1).getValues().forEach(function (r, i) {
+    if (String(r[0]) === String(id)) rows.push(i + 2);
+  });
+  return rows;
+}
+
 // The PWA sends text/plain POSTs to avoid CORS preflight.
 function doPost(e) {
   try {
@@ -53,41 +67,70 @@ function doPost(e) {
     const token = getToken_();
     if (!token || body.token !== token) return json_({ ok: false, error: 'unauthorized' });
 
-    const sh = getSheet_();
-
-    if (body.action === 'undo') {
-      const last = sh.getLastRow();
-      if (last <= 1) return json_({ ok: false, error: 'nothing to undo' });
-      const row = sh.getRange(last, 1, 1, HEADERS.length).getValues()[0];
-      sh.deleteRow(last);
-      return json_({ ok: true, undone: row });
+    // one write at a time, so two quick saves can't collide
+    const lock = LockService.getScriptLock();
+    lock.waitLock(10000);
+    try {
+      const sh = getSheet_();
+      if (body.action === 'add') return json_(add_(sh, body.tx || {}));
+      if (body.action === 'undo') return json_(undo_(sh, body.id));
+      return json_({ ok: false, error: 'unknown action' });
+    } finally {
+      lock.releaseLock();
     }
-
-    if (body.action === 'add') {
-      const t = body.tx;
-      const amount = Number(t.amount);
-      if (!(amount > 0)) return json_({ ok: false, error: 'bad amount' });
-      if (t.type !== 'Income' && t.type !== 'Expense') return json_({ ok: false, error: 'bad type' });
-
-      const now = new Date();
-      const tz = Session.getScriptTimeZone();
-      sh.appendRow([
-        Utilities.formatDate(now, tz, 'yyyy-MM-dd'),
-        Utilities.formatDate(now, tz, 'HH:mm:ss'),
-        t.type,
-        amount,
-        text_(t.account),
-        text_(t.category),
-        text_(t.note),
-        text_(t.raw)
-      ]);
-      return json_({ ok: true });
-    }
-
-    return json_({ ok: false, error: 'unknown action' });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   }
+}
+
+function add_(sh, t) {
+  const amount = Number(t.amount);
+  if (!(amount > 0)) return { ok: false, error: 'bad amount' };
+  const account = String(t.account || '').trim();
+  if (!account) return { ok: false, error: 'missing account' };
+  if (t.type !== 'Income' && t.type !== 'Expense' && t.type !== 'Transfer') return { ok: false, error: 'bad type' };
+
+  // The phone retries queued entries; if this one already landed, don't add it twice.
+  const id = String(t.id || '');
+  if (id && findRows_(sh, id).length) return { ok: true, duplicate: true };
+
+  const now = new Date();
+  const tz = Session.getScriptTimeZone();
+  const date = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  const time = Utilities.formatDate(now, tz, 'HH:mm:ss');
+  function row(type, acc, category, note) {
+    // leading ' keeps the ID as text, so Sheets never turns it into a number or date
+    return [date, time, type, amount, text_(acc), text_(category), text_(note), text_(t.raw), id ? "'" + id : ''];
+  }
+
+  if (t.type === 'Transfer') {
+    // money moving between your accounts: out of one, into the other, total unchanged
+    const to = String(t.toAccount || '').trim();
+    if (!to || to === account) return { ok: false, error: 'bad transfer accounts' };
+    const note = t.note || ('Transfer ' + account + ' to ' + to);
+    sh.appendRow(row('Expense', account, 'Transfer', note));
+    sh.appendRow(row('Income', to, 'Transfer', note));
+    return { ok: true };
+  }
+
+  sh.appendRow(row(t.type, account, t.category, t.note));
+  return { ok: true };
+}
+
+// With an id: remove that entry (both rows of a transfer). Without: the last row.
+function undo_(sh, id) {
+  let rows;
+  if (id) {
+    rows = findRows_(sh, id);
+    if (!rows.length) return { ok: false, error: 'entry not found in sheet' };
+  } else {
+    const last = sh.getLastRow();
+    if (last <= 1) return { ok: false, error: 'nothing to undo' };
+    rows = [last];
+  }
+  const undone = rows.map(function (r) { return sh.getRange(r, 1, 1, HEADERS.length).getValues()[0]; });
+  rows.sort(function (a, b) { return b - a; }).forEach(function (r) { sh.deleteRow(r); });
+  return { ok: true, undone: undone };
 }
 
 // Quick browser check: open the web app URL, should say "Piso is alive".
@@ -128,23 +171,27 @@ function setupSheets() {
   acc.getRange(total, 1, 1, 4).setFontWeight('bold');
   acc.getRange(2, 2, total - 1, 3).setNumberFormat('#,##0.00');
 
+  // Transfers move money between accounts, so the Summary leaves them out.
   let sum = ss.getSheetByName('Summary');
   if (!sum) sum = ss.insertSheet('Summary');
   sum.clear();
   sum.getRange('A1').setValue('Expenses by category (this month)').setFontWeight('bold');
-  sum.getRange('A2').setFormula(
-    '=IFERROR(QUERY(Transactions!A:G,' +
-    '"select F, sum(D) where C = \'Expense\' and A >= date \'"&TEXT(EOMONTH(TODAY(),-1)+1,"yyyy-mm-dd")&"\' ' +
-    'group by F label sum(D) \'Total\'",1),"No data yet")'
-  );
+  sum.getRange('A2').setFormula(SUMMARY_QUERY_);
   sum.getRange('D1').setValue('Month totals').setFontWeight('bold');
   sum.getRange('D2:D3').setValues([['Income'], ['Expense']]);
-  sum.getRange('E2:E3').setFormulas([
-    ['=SUMIFS(Transactions!D:D,Transactions!C:C,"Income",Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))'],
-    ['=SUMIFS(Transactions!D:D,Transactions!C:C,"Expense",Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))']
-  ]);
+  sum.getRange('E2:E3').setFormulas([[monthTotal_('Income')], [monthTotal_('Expense')]]);
   sum.getRange('E2:E3').setNumberFormat('#,##0.00');
 
   // Copy this from View > Logs (Execution log) into the app's Settings.
   Logger.log('Your Piso token: ' + ensureToken_());
+}
+
+const SUMMARY_QUERY_ =
+  '=IFERROR(QUERY(Transactions!A:G,' +
+  '"select F, sum(D) where C = \'Expense\' and F <> \'Transfer\' and A >= date \'"&TEXT(EOMONTH(TODAY(),-1)+1,"yyyy-mm-dd")&"\' ' +
+  'group by F label sum(D) \'Total\'",1),"No data yet")';
+
+function monthTotal_(type) {
+  return '=SUMIFS(Transactions!D:D,Transactions!C:C,"' + type + '",Transactions!F:F,"<>Transfer",' +
+    'Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))';
 }
