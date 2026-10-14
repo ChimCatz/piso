@@ -186,13 +186,14 @@ function parseCommand(raw) {
   note = note.replace(/\b(into|from|to|in|on)\s+(bdo|gcash|g cash|maya|paymaya|cash)\b/g, '').trim();
   if (note) note = note.replace(/\b\w/g, (c) => c.toUpperCase());
 
-  // category
+  // category: longest keyword wins, so "water bill" beats "water"
   const haystack = (note || text).toLowerCase();
   let category = type === 'Income' ? 'Other Income' : 'Other';
-  outer: for (const [cat, kws] of Object.entries(CATEGORY_KEYWORDS)) {
-    for (const kw of kws) {
-      if (new RegExp('\\b' + kw + '\\b').test(haystack)) { category = cat; break outer; }
-    }
+  const keywords = Object.entries(CATEGORY_KEYWORDS)
+    .flatMap(([cat, kws]) => kws.map((kw) => [kw, cat]))
+    .sort((a, b) => b[0].length - a[0].length);
+  for (const [kw, cat] of keywords) {
+    if (new RegExp('\\b' + kw + '\\b').test(haystack)) { category = cat; break; }
   }
   if (type === 'Income' && !['Salary', 'Other Income'].includes(category)) category = 'Other Income';
 

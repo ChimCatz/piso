@@ -4,8 +4,23 @@
  * Deploy as Web app: Execute as "Me", access "Anyone".
  */
 
-const TOKEN = 'CHANGE_ME_TO_A_LONG_RANDOM_STRING'; // must match the PWA config
+// The secret token lives in Script Properties (key TOKEN), never in this file,
+// so the repo can stay public. setupSheets() creates one if it's missing.
 const SHEET_NAME = 'Transactions';
+
+function getToken_() {
+  return PropertiesService.getScriptProperties().getProperty('TOKEN');
+}
+
+function ensureToken_() {
+  const props = PropertiesService.getScriptProperties();
+  let token = props.getProperty('TOKEN');
+  if (!token) {
+    token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+    props.setProperty('TOKEN', token);
+  }
+  return token;
+}
 const HEADERS = ['Date', 'Time', 'Type', 'Amount', 'Account', 'Category', 'Note', 'Raw text'];
 
 function getSheet_() {
@@ -29,7 +44,8 @@ function json_(obj) {
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
-    if (body.token !== TOKEN) return json_({ ok: false, error: 'unauthorized' });
+    const token = getToken_();
+    if (!token || body.token !== token) return json_({ ok: false, error: 'unauthorized' });
 
     const sh = getSheet_();
 
@@ -121,4 +137,7 @@ function setupSheets() {
     ['Expense', '=SUMIFS(Transactions!D:D,Transactions!C:C,"Expense",Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))']
   ]);
   sum.getRange('E2:E3').setNumberFormat('#,##0.00');
+
+  // Copy this from View > Logs (Execution log) into the app's Settings.
+  Logger.log('Your Piso token: ' + ensureToken_());
 }

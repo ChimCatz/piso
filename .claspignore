@@ -1,0 +1,4 @@
+# Only the backend goes to Apps Script; everything else is the PWA.
+**/**
+!Code.gs
+!appsscript.json
