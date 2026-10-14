@@ -7,7 +7,7 @@
 //
 // Every mismatch is a phrase worth adding to tests/parser.test.js.
 import fs from 'node:fs';
-import P from '../parser.js';
+import P from '../app/parser.js';
 
 const file = process.argv[2];
 if (!file) { console.error('Usage: npm run audit -- <Transactions.csv>'); process.exit(2); }

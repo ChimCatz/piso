@@ -140,38 +140,28 @@ function doGet() {
 
 /**
  * Run once from the editor to create the Accounts + Summary tabs.
- * Edit the ACCOUNTS list to match yours.
+ * Running it again rebuilds those two tabs; Transactions is never touched.
  */
 function setupSheets() {
-  const ACCOUNTS = ['BDO', 'GCash', 'Maya', 'Cash'];
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   getSheet_();
 
+  // Every account you have used appears here by itself, alphabetically.
+  // Start a new account with "plus 12,000 into BPI opening balance".
   let acc = ss.getSheetByName('Accounts');
   if (!acc) acc = ss.insertSheet('Accounts');
   acc.clear();
-  acc.appendRow(['Account', 'Income', 'Expense', 'Balance']);
-  ACCOUNTS.forEach(function (name, i) {
-    const r = i + 2;
-    acc.appendRow([
-      name,
-      '=SUMIFS(Transactions!D:D,Transactions!E:E,A' + r + ',Transactions!C:C,"Income")',
-      '=SUMIFS(Transactions!D:D,Transactions!E:E,A' + r + ',Transactions!C:C,"Expense")',
-      '=B' + r + '-C' + r
-    ]);
-  });
-  const total = ACCOUNTS.length + 2;
-  acc.getRange(total, 1, 1, 4).setValues([[
-    'TOTAL',
-    '=SUM(B2:B' + (total - 1) + ')',
-    '=SUM(C2:C' + (total - 1) + ')',
-    '=SUM(D2:D' + (total - 1) + ')'
-  ]]);
-  acc.getRange(1, 1, 1, 4).setFontWeight('bold');
-  acc.getRange(total, 1, 1, 4).setFontWeight('bold');
-  acc.getRange(2, 2, total - 1, 3).setNumberFormat('#,##0.00');
+  acc.getRange('A1:D1').setValues([['Account', 'Income', 'Expense', 'Balance']]);
+  acc.getRange('F1').setValue('Total balance');
+  acc.getRange('A2:D2').setFormulas([ACCOUNT_FORMULAS_]);
+  acc.getRange('F2').setFormula('=SUM(D2:D)');
+  acc.getRange('A1:F1').setFontWeight('bold');
+  acc.getRange('F2').setFontWeight('bold');
+  acc.getRange('B2:D').setNumberFormat('#,##0.00');
+  acc.getRange('F2').setNumberFormat('#,##0.00');
 
-  // Transfers move money between accounts, so the Summary leaves them out.
+  // Transfers move money between accounts and opening balances aren't new money,
+  // so the Summary leaves both out.
   let sum = ss.getSheetByName('Summary');
   if (!sum) sum = ss.insertSheet('Summary');
   sum.clear();
@@ -186,12 +176,22 @@ function setupSheets() {
   Logger.log('Your Piso token: ' + ensureToken_());
 }
 
+const ACCOUNT_FORMULAS_ = [
+  '=IFERROR(SORT(UNIQUE(FILTER(Transactions!E2:E,Transactions!E2:E<>""))),"")',
+  // SUMIFS won't expand row by row inside ARRAYFORMULA, so match on "account|type" with SUMIF instead
+  '=ARRAYFORMULA(IF(A2:A="",,SUMIF(Transactions!E2:E&"|"&Transactions!C2:C,A2:A&"|Income",Transactions!D2:D)))',
+  '=ARRAYFORMULA(IF(A2:A="",,SUMIF(Transactions!E2:E&"|"&Transactions!C2:C,A2:A&"|Expense",Transactions!D2:D)))',
+  '=ARRAYFORMULA(IF(A2:A="",,B2:B-C2:C))'
+];
+
 const SUMMARY_QUERY_ =
   '=IFERROR(QUERY(Transactions!A:G,' +
-  '"select F, sum(D) where C = \'Expense\' and F <> \'Transfer\' and A >= date \'"&TEXT(EOMONTH(TODAY(),-1)+1,"yyyy-mm-dd")&"\' ' +
-  'group by F label sum(D) \'Total\'",1),"No data yet")';
+  '"select F, sum(D) where C = \'Expense\' and F <> \'Transfer\' and F <> \'Opening Balance\' ' +
+  'and A >= date \'"&TEXT(EOMONTH(TODAY(),-1)+1,"yyyy-mm-dd")&"\' ' +
+  'group by F order by sum(D) desc label sum(D) \'Total\'",1),"No data yet")';
 
 function monthTotal_(type) {
-  return '=SUMIFS(Transactions!D:D,Transactions!C:C,"' + type + '",Transactions!F:F,"<>Transfer",' +
+  return '=SUMIFS(Transactions!D:D,Transactions!C:C,"' + type + '",' +
+    'Transactions!F:F,"<>Transfer",Transactions!F:F,"<>Opening Balance",' +
     'Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))';
 }

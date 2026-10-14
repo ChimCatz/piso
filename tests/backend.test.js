@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
 
-const CODE = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const CODE = fs.readFileSync(path.join(__dirname, '..', 'backend', 'Code.gs'), 'utf8');
 
 /* ---------- A tiny fake of the Apps Script services Code.gs uses ---------- */
 // What typing a value into a cell does: ' forces text, = is a formula, + - @ break.
@@ -21,9 +21,9 @@ function enter(v) {
 
 function a1(ref) {
   const [start, end] = ref.split(':').map((r) => {
-    const m = /^([A-Z]+)(\d+)$/.exec(r);
+    const m = /^([A-Z]+)(\d*)$/.exec(r);
     const col = [...m[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
-    return { row: Number(m[2]), col };
+    return { row: m[2] ? Number(m[2]) : 1000, col }; // "B2:D" runs to the bottom
   });
   const e = end || start;
   return [start.row, start.col, e.row - start.row + 1, e.col - start.col + 1];
@@ -224,13 +224,18 @@ test('the lock is always released', () => {
 test('setupSheets builds the tabs, keeps labels as text and makes a token', () => {
   const s = setup({ token: null });
   s.ctx.setupSheets();
-  const acc = s.sheets.Accounts.rows();
-  assert.deepEqual(acc.map((r) => r[0]), ['Account', 'BDO', 'GCash', 'Maya', 'Cash', 'TOTAL']);
+  const acc = s.sheets.Accounts;
+  assert.deepEqual([1, 2, 3, 4, 6].map((c) => acc.read(1, c)), ['Account', 'Income', 'Expense', 'Balance', 'Total balance']);
+  assert.match(acc.read(2, 1).formula, /UNIQUE\(FILTER\(Transactions!E2:E/);  // every account used, no fixed list
+  assert.match(acc.read(2, 2).formula, /SUMIF\(Transactions!E2:E&"\|"&Transactions!C2:C,A2:A&"\|Income"/); // SUMIFS doesn't expand per row
+  assert.doesNotMatch(acc.read(2, 2).formula + acc.read(2, 3).formula, /SUMIFS/);
+  assert.match(acc.read(2, 4).formula, /B2:B-C2:C/);
+  assert.equal(acc.read(2, 6).formula, '=SUM(D2:D)');
   const sum = s.sheets.Summary;
   assert.equal(sum.read(2, 4), 'Income');    // was a formula (#NAME?) before
   assert.equal(sum.read(3, 4), 'Expense');
-  assert.match(sum.read(2, 5).formula, /"<>Transfer"/);
-  assert.match(sum.read(2, 1).formula, /F <> 'Transfer'/);
+  assert.match(sum.read(2, 5).formula, /"<>Transfer",Transactions!F:F,"<>Opening Balance"/);
+  assert.match(sum.read(2, 1).formula, /F <> 'Transfer' and F <> 'Opening Balance'/);
   assert.match(s.props.TOKEN, /^[0-9a-f]{64}$/);
   assert.ok(s.logs.some((l) => l.includes(s.props.TOKEN)));
 });

@@ -1,7 +1,11 @@
-# Saved Claude.ai conversation export (personal, not part of the app)
+# Saved chat exports and downloads
 *.htm
+*.csv
 
-# OS / editor junk
+# Node
+node_modules/
+
+# OS / editor
 .DS_Store
 Thumbs.db
 .vscode/

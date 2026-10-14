@@ -1,35 +1,16 @@
 /**
  * Piso parser: turns what you said ("minus 29 for coffee") into an entry.
  * Used by index.html (as window.PisoParser) and by the Node tests.
+ * To teach it new words, edit vocabulary.js instead.
  */
 (function (root) {
   'use strict';
 
-  /* ---------- Config you can edit ---------- */
-  const DEFAULT_ACCOUNTS = ['BDO', 'GCash', 'Maya', 'Cash'];
-  const ACCOUNT_ALIASES = {            // spoken form -> account name
-    'bdo': 'BDO', 'b d o': 'BDO', 'bee dee oh': 'BDO', 'bdo unibank': 'BDO',
-    'gcash': 'GCash', 'g cash': 'GCash', 'gee cash': 'GCash', 'ji cash': 'GCash',
-    'maya': 'Maya', 'maia': 'Maya', 'paymaya': 'Maya', 'pay maya': 'Maya',
-    'cash': 'Cash', 'wallet': 'Cash', 'pitaka': 'Cash'
-  };
-  const CATEGORIES = ['Food', 'Transport', 'Load/Bills', 'Shopping', 'Health', 'Entertainment', 'Savings', 'Salary', 'Other Income', 'Other'];
-  const INCOME_CATEGORIES = ['Salary', 'Other Income'];
-  const CATEGORY_KEYWORDS = {          // category -> words that trigger it (longest match wins)
-    'Food': ['coffee', 'kape', 'lunch', 'dinner', 'breakfast', 'snack', 'snacks', 'food', 'milk tea', 'jollibee', 'mcdo', 'mcdonalds', 'kfc', 'chowking', 'starbucks', 'grab food', 'foodpanda', 'grocery', 'groceries', 'rice', 'bigas', 'water', 'ulam', 'kain', 'kumain', 'merienda', 'meryenda', 'pagkain', 'almusal', 'tanghalian', 'hapunan', 'palengke', 'bread', 'pandesal'],
-    'Transport': ['jeep', 'jeepney', 'taxi', 'grab', 'grab car', 'angkas', 'joyride', 'fare', 'pamasahe', 'pasahe', 'gas', 'gasoline', 'diesel', 'bus', 'tricycle', 'trike', 'lrt', 'mrt', 'parking', 'toll'],
-    'Load/Bills': ['load', 'dito', 'globe', 'smart', 'internet', 'wifi', 'pldt', 'converge', 'electric', 'electricity', 'kuryente', 'meralco', 'water bill', 'maynilad', 'manila water', 'bill', 'bills', 'rent', 'upa', 'renta', 'subscription'],
-    'Shopping': ['shopee', 'lazada', 'tiktok shop', 'shein', 'ukay', 'clothes', 'shoes', 'shopping', 'mall'],
-    'Health': ['medicine', 'gamot', 'botika', 'pharmacy', 'mercury drug', 'doctor', 'clinic', 'checkup', 'check up', 'dentist', 'vitamins', 'hospital'],
-    'Entertainment': ['game', 'games', 'netflix', 'youtube premium', 'disney', 'movie', 'sine', 'spotify', 'steam', 'top up', 'topup'],
-    'Savings': ['savings', 'save', 'ipon'],
-    'Salary': ['salary', 'sweldo', 'sahod', 'payroll', 'payday'],
-    'Other Income': ['refund', 'gift', 'regalo', 'bonus', 'allowance', 'padala', 'remittance', 'cashback', 'sold', 'sale', 'freelance']
-  };
-  const INCOME_WORDS = ['plus', 'add', 'added', 'income', 'received', 'receive', 'deposit', 'deposited', 'earned', 'got', 'salary', 'sweldo', 'sahod', 'natanggap'];
-  const EXPENSE_WORDS = ['minus', 'less', 'spent', 'spend', 'expense', 'paid', 'pay', 'bought', 'buy', 'deduct', 'gastos', 'gumastos', 'bayad', 'binayad', 'nagbayad', 'bumili', 'binili'];
-  const TRANSFER_WORDS = ['transfer', 'transferred', 'lipat', 'inilipat'];
-  const WITHDRAW_WORDS = ['withdraw', 'withdrew', 'withdrawal', 'withdrawn']; // ATM: account -> Cash
+  // The words Piso listens for live in vocabulary.js
+  const V = (typeof module === 'object' && module.exports) ? require('./vocabulary.js') : root.PisoVocabulary;
+  const { DEFAULT_ACCOUNTS, ACCOUNT_ALIASES, CATEGORIES, INCOME_CATEGORIES, CATEGORY_KEYWORDS,
+    INCOME_WORDS, EXPENSE_WORDS, TRANSFER_WORDS, WITHDRAW_WORDS } = V;
+
   const FROM_WORDS = ['from', 'galing'];
   const TO_WORDS = ['to', 'into', 'sa', 'papunta'];
   const PREPOSITIONS = ['from', 'galing', 'to', 'into', 'in', 'on', 'using', 'via', 'with', 'at', 'sa', 'papunta', 'thru', 'through'];
@@ -63,7 +44,7 @@
 
   // Every keyword, longest first, so "water bill" beats "water"
   const KEYWORDS = Object.entries(CATEGORY_KEYWORDS)
-    .flatMap(([cat, kws]) => kws.map((kw) => [kw, cat]))
+    .flatMap(([cat, kws]) => kws.map((kw) => [simplify(kw), cat]))
     .sort((a, b) => b[0].length - a[0].length);
   // Words that should never be fuzzy-matched to an account name
   const KNOWN_WORDS = new Set([].concat(INCOME_WORDS, EXPENSE_WORDS, TRANSFER_WORDS, WITHDRAW_WORDS, FILLER,
@@ -120,7 +101,10 @@
       .replace(/\b(php|pesos?|piso)\b/gi, ' '))
       .replace(/[!?;:"“”]/g, ' ')
       .replace(/,(?!\d)/g, ' ')
-      .replace(/\s+/g, ' ').trim();
+      .replace(/\s+/g, ' ').trim()
+      // keep the store's name from turning into a number ("7 eleven" -> "7 11")
+      .replace(/(^|\s)(7|seven)(\s*[-\/]\s*|\s+)(eleven|11)(?=\s|$)/g, (m, pre, n, sep, e) =>
+        (e === '11' && !/[-\/]/.test(sep)) ? m : pre + '7-eleven');
     return wordsToDigits(t);
   }
 
@@ -174,19 +158,21 @@
     const defaultAccount = accounts.includes(opts.defaultAccount) ? opts.defaultAccount
       : (accounts.includes('Cash') ? 'Cash' : accounts[0]);
     const text = normalize(raw);
-    const words = text.split(' ');
 
-    // type
+    // type (word lists can hold phrases like "cash in", so match phrases, not single words)
+    const firstAt = (list) => list.reduce((best, p) => {
+      const m = phraseRe(p).exec(text);
+      return m && (best < 0 || m.index < best) ? m.index : best;
+    }, -1);
     let type = 'Expense', typeFound = false, withdraw = false;
-    if (words.some((w) => TRANSFER_WORDS.includes(w))) { type = 'Transfer'; typeFound = true; }
-    else if (words.some((w) => WITHDRAW_WORDS.includes(w)) && accounts.includes('Cash')) { type = 'Transfer'; typeFound = true; withdraw = true; }
+    const incomeAt = firstAt(INCOME_WORDS), expenseAt = firstAt(EXPENSE_WORDS);
+    if (firstAt(TRANSFER_WORDS) >= 0) { type = 'Transfer'; typeFound = true; }
+    else if (firstAt(WITHDRAW_WORDS) >= 0 && accounts.includes('Cash')) { type = 'Transfer'; typeFound = true; withdraw = true; }
     else if (/(^|\s)\+\s*\d/.test(text)) { type = 'Income'; typeFound = true; }       // Chrome: "plus 500" -> "+ 500"
     else if (/(^|\s)[-−–]\s*\d/.test(text)) { type = 'Expense'; typeFound = true; }   // Chrome: "minus 29" -> "-29"
-    else {
-      for (const w of words) {
-        if (INCOME_WORDS.includes(w)) { type = 'Income'; typeFound = true; break; }
-        if (EXPENSE_WORDS.includes(w)) { type = 'Expense'; typeFound = true; break; }
-      }
+    else if (incomeAt >= 0 || expenseAt >= 0) {
+      type = expenseAt < 0 || (incomeAt >= 0 && incomeAt < expenseAt) ? 'Income' : 'Expense';
+      typeFound = true;
     }
 
     // amount: "6,890.90", "29", "1.5k", "5 thousand", "p500"
@@ -232,8 +218,12 @@
       while (noteWords.length && FILLER.includes(noteWords[0])) noteWords.shift();
       while (noteWords.length && FILLER.includes(noteWords[noteWords.length - 1])) noteWords.pop();
     } else {
-      const typeWords = [].concat(INCOME_WORDS, EXPENSE_WORDS, TRANSFER_WORDS, WITHDRAW_WORDS);
-      noteWords = cleaned.split(/\s+/).filter((w) => w && !FILLER.includes(w) && !typeWords.includes(w) && !/^[\d.,]+$/.test(w));
+      [].concat(INCOME_WORDS, EXPENSE_WORDS, TRANSFER_WORDS, WITHDRAW_WORDS)
+        .sort((a, b) => b.length - a.length)
+        .forEach((p) => {
+          cleaned = cleaned.replace(new RegExp('(^|\\s)' + escapeRe(p) + '(?=\\s|$)', 'g'), (m, pre) => pre + ' '.repeat(m.length - pre.length));
+        });
+      noteWords = cleaned.split(/\s+/).filter((w) => w && !FILLER.includes(w) && !/^[\d.,]+$/.test(w));
     }
     const note = noteWords.join(' ');
 
@@ -246,6 +236,7 @@
     if (!category) {
       for (const [kw, cat] of KEYWORDS) { if (phraseRe(kw).test(hay)) { category = cat; break; } }
     }
+    if (category === 'Opening Balance' && type !== 'Transfer') { type = 'Income'; typeFound = true; } // "BDO opening balance 12,000"
     if (type === 'Transfer') category = 'Transfer';
     else if (type === 'Income') { if (!INCOME_CATEGORIES.includes(category)) category = 'Other Income'; }
     else if (!category || INCOME_CATEGORIES.includes(category)) category = 'Other';

@@ -1,91 +1,176 @@
-# Piso: voice income & expense tracker
+<div align="center">
 
-Say "Minus 29 for coffee" or "Plus 6890.90 into BDO" and it lands in your Google Sheet.
+<h1><img src="docs/logo.png" alt="Piso" width="260"></h1>
+
+**Say what you spent. It lands in your Google Sheet.**
+
+A voice-first income and expense tracker for your phone. Tap the mic, say *"minus 29 for coffee"* or *"plus 6890.90 into BDO"*, check the card, and the entry is saved to a Google Sheet you own. Free to run: no app store, no subscriptions, no Zapier.
+
+![Tests](https://github.com/ChimCatz/piso/actions/workflows/ci.yml/badge.svg)
+![PWA](https://img.shields.io/badge/app-installable%20PWA-0f766e)
+![Google Apps Script](https://img.shields.io/badge/backend-Google%20Apps%20Script-4285f4)
+![No build step](https://img.shields.io/badge/build-none%20needed-16a34a)
+![License: MIT](https://img.shields.io/badge/license-MIT-f59e0b)
+
+</div>
+
+<p align="center"><img src="docs/screenshot.png" alt="Three Piso screens: an expense, a transfer between accounts, and an income in dark mode" width="900"></p>
 
 ```
-Phone (PWA)  →  Google Apps Script  →  Google Sheet
+Phone (installable web app)  →  Google Apps Script  →  Google Sheet
 ```
 
-All free. No Zapier, no Play Store.
+## What it does
 
-## Files
-- `Code.gs`, `appsscript.json`: the backend (Apps Script, pushed with clasp)
-- `.clasp.json`, `.claspignore`: link this folder to the Apps Script project bound to the Piso sheet
-- `index.html`, `parser.js`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`: the app
-- `tests/`, `scripts/`, `package.json`: tests and checks (see Tests)
+- **Understands how you actually talk.** Digits or words ("twenty nine", "one fifty", "5 thousand", "1.5k"), English or Taglish ("sweldo 15000 BDO", "minus 60 pamasahe", "gastos 80 kape").
+- **Files it for you.** Picks the type, account and category from what you said, using over 600 words for Philippine restaurants, stores, bills, foods and everyday things.
+- **Checks before saving.** Every entry shows a confirm card you can fix with one tap. Fix a category once and Piso remembers it for next time.
+- **Handles transfers.** "Transfer 2000 from BDO to GCash", "cash in 500 to GCash" or "withdraw 1000 from BDO" moves money between accounts without counting it as income or spending.
+- **Forgives mishearings.** Chrome can return several guesses; Piso keeps the one that makes sense. "Maia", "G-Cash" and "B.D.O." still find the right account.
+- **Works offline.** No signal? Entries wait on your phone and are sent when you're back online, never twice.
+- **Undoes exactly one thing.** **Undo last** removes the newest entry, both halves of a transfer included.
+- **Keeps your data yours.** Entries go straight to your own Google Sheet, behind a secret token only your phone knows.
 
-## Setup (about 20 minutes)
+## Set up
 
-### 1. Sheet + backend
-The script is already bound to the Piso sheet and deployed with [clasp](https://github.com/google/clasp)
-(`npm install -g @google/clasp`, `clasp login`).
+About 20 minutes, once.
 
-1. Run `clasp open-script` (or open the sheet → **Extensions → Apps Script**).
-2. Edit the `ACCOUNTS` list inside `setupSheets()` if yours differ, then `clasp push`.
-3. Select `setupSheets` in the function dropdown and click **Run**. Approve the permissions prompt. This creates the *Transactions*, *Accounts* and *Summary* tabs, and generates your secret token.
-4. Open **Execution log** and copy the line `Your Piso token: ...` (you'll need it in step 3). It's stored in **Project Settings → Script Properties** as `TOKEN`, never in the code, so the repo can stay public.
-5. Run `clasp list-deployments` and open `https://script.google.com/macros/s/<deployment id>/exec`. It should say "Piso is alive".
+### 1. The sheet and its backend
 
-### 2. Host the app (free)
-Pick one:
-- **GitHub Pages**: push this repo, then Settings → Pages → deploy from `main`.
-- **Cloudflare Pages / Netlify**: drag-and-drop the folder.
+1. Create a Google Sheet (for example, named **Piso**).
+2. In the sheet, **Extensions → Apps Script**. Replace the code with [`backend/Code.gs`](backend/Code.gs). In **Project Settings**, tick *Show "appsscript.json" manifest file* and replace that file with [`backend/appsscript.json`](backend/appsscript.json).
+3. Pick **`setupSheets`** in the function list and click **Run**. Approve the permissions. Google warns that it hasn't verified the app: choose **Advanced → Go to … (unsafe)**, since it is your own script. This creates the *Transactions*, *Accounts* and *Summary* tabs.
+4. Open **Execution log** and copy the line **`Your Piso token: …`**. It is stored in **Project Settings → Script Properties**, never in the code.
+5. **Deploy → New deployment → Web app**, execute as **Me**, access **Anyone**. Copy the **Web app URL**. Opening it should say *Piso is alive*.
 
-Your token is **not** stored in these files. You type it into the app's Settings on your phone, so a public repo is fine.
+<details>
+<summary>Prefer the command line? Use clasp</summary>
 
-### 3. Install on the Samsung A54
-1. Open your hosted URL in **Chrome**.
-2. In Piso's Settings, paste the **Web app URL** and your **token**, check your accounts, then Save.
-3. Chrome menu (⋮) → **Add to Home screen / Install app**.
-4. Allow microphone access when asked.
+```
+npm install -g @google/clasp
+clasp login
+clasp create-script --title "Piso backend" --parentId <your sheet id> --rootDir backend
+clasp push
+clasp create-deployment --description "Piso v1"
+```
 
-## Using it
-- Tap the mic, speak, check the confirm card, tap **Save**.
-- Things it understands:
-  - "Minus 29 for coffee", "Plus 6890.90 into BDO", "spent 150 on lunch using GCash"
-  - Amounts: "1.5k", "5 thousand", "twenty nine", "one fifty" (= 150), "₱1,000"
-  - Taglish: "sweldo 15000 BDO", "minus 60 pamasahe", "gastos 80 kape"
-  - Transfers: "transfer 1000 from BDO to GCash", "withdraw 2000 from BDO" (BDO → Cash).
-    A transfer is two rows (out of one account, into the other), so your total stays the same,
-    and the Summary leaves it out of income and spending.
-- If you fix the category on the confirm card, Piso remembers it for that note next time.
-- Wrong entry? **Undo last** removes exactly the newest entry in Recent (both rows of a transfer).
-- No signal? Entries are queued on the phone and sent when you're back online. Each entry has an ID,
-  so a retry never adds it twice.
-- No mic? Use the text box or your Samsung keyboard's mic button.
+Then run `setupSheets` once in the editor (step 3 above), because Google only lets the owner grant permissions. This repo's `.clasp.json` points at the author's script; `clasp create-script` replaces it with yours.
+</details>
 
-## Customising
-- In the app's **Settings**: your accounts, the default account, nicknames
-  (`bpi family=BPI, ewallet=GCash`) and the speech language (English or Filipino).
-- In `parser.js`, at the top: `ACCOUNT_ALIASES`, `CATEGORIES`, `CATEGORY_KEYWORDS`
-  (e.g. add `'ukay'` under Shopping) and the words that set the type.
+### 2. Host the app
 
-After editing, run `npm test`, then push. Because of the offline cache, close and reopen the app once to get the new version.
+Fork or push this repo to GitHub, then **Settings → Pages → Source: GitHub Actions**. Every push to `main` runs the tests and publishes the [`app/`](app/) folder at `https://<you>.github.io/piso/`.
+
+The token is **not** in any file. You type it into the app on your phone, so a public repo is fine.
+
+### 3. Install it on your phone
+
+1. Open your Pages address in **Chrome** on Android.
+2. In **Settings**, paste the Web app URL and the token, list your accounts, and tap **Save settings**.
+3. Chrome menu **⋮ → Add to Home screen** (or **Install app**).
+4. Tap the mic and allow microphone access.
+
+## Use
+
+Tap the mic and speak, or type into the box. Check the card, then **Save**.
+
+| You say | Piso saves |
+| --- | --- |
+| "Minus 29 for coffee" | Expense ₱29 · Cash · Food · *Coffee* |
+| "Plus 6890.90 into BDO" | Income ₱6,890.90 · BDO |
+| "Spent 150 on lunch using GCash" | Expense ₱150 · GCash · Food · *Lunch* |
+| "Minus one fifty for jeep" | Expense ₱150 · Cash · Transport |
+| "Sweldo 15000 BDO" | Income ₱15,000 · BDO · Salary |
+| "Minus 1,850 for groceries at Puregold" | Expense ₱1,850 · Cash · Groceries |
+| "Minus 2,300 for Cepalco" | Expense ₱2,300 · Cash · Load/Bills |
+| "Transfer 2000 from BDO to GCash" | Transfer ₱2,000 · BDO → GCash |
+| "Withdraw 1000 from BDO" | Transfer ₱1,000 · BDO → Cash |
+| "Plus 12,000 into BPI opening balance" | Income ₱12,000 · BPI · Opening Balance |
+
+If you don't name an account, the **default account** from Settings is used.
+
+### Accounts
+
+- **Add one** in the app's **Settings → Accounts** (comma separated). The sheet's *Accounts* tab picks up every account you use by itself.
+- **Start it at its real balance** by saying "plus 12,000 into BPI opening balance". Opening balances count toward the account's balance but not toward the month's income.
+- **Nicknames:** if you call an account something Piso doesn't know, add it under **Settings → Nicknames**, like `bpi family=BPI, ewallet=GCash`. Common banks and e-wallets (BPI, Metrobank, UnionBank, Landbank, GoTyme, SeaBank, ShopeePay, Coins.ph and more) are already understood once they are in your list.
+
+### The sheet
+
+- **Transactions** has one row per entry (two for a transfer), with what you said in *Raw text*.
+- **Accounts** lists the income, spending and balance of each account, plus the total.
+- **Summary** shows this month's spending by category, and the month's income and expense totals. Transfers and opening balances are left out.
+
+### Undo and offline
+
+- **Undo last** asks first, then removes the newest entry in *Recent*.
+- With no signal, the entry is marked *queued* and sent when you're back online. Each entry has an ID, so a retry is never saved twice.
+
+## Teach it your words
+
+Piso learns two ways.
+
+1. **By itself.** When you change the category on the confirm card, the note is remembered on your phone ("ulam" → Food) and wins over the built-in words next time.
+2. **In [`app/vocabulary.js`](app/vocabulary.js).** All the words live there: account aliases, categories and their keywords, and the words that mean *plus*, *minus* or *transfer*. Add your favourite carinderia or sari-sari store, run `npm test`, and push. Longer phrases win, so "grab food" (Food) beats "grab" (Transport).
+
+To see where Piso still gets you wrong, download the *Transactions* tab as CSV (**File → Download → CSV**) and run:
+
+```
+npm run audit -- "Piso - Transactions.csv"
+```
+
+It re-reads everything you've said and lists each entry you had to correct. Each one is a good new test case.
+
+## Good to know
+
+- Anyone with your Web app URL **and** token can add rows to your sheet. Keep both private. To change the token, edit `TOKEN` in **Script Properties** and update it on your phone.
+- Voice uses Chrome's speech recognition, which needs internet and sometimes mishears. That's what the confirm card is for. The typed box and your keyboard's mic work as fallbacks.
+- Speech language can be English (Philippines), Filipino or English (US), in **Settings**.
+- After an update, close and reopen the app once while online to get the new version.
+
+## Project layout
+
+Plain JavaScript, no dependencies and no build step.
+
+| Path | What it is |
+| --- | --- |
+| `app/index.html` | The app: mic, confirm card, recent list, settings, offline queue |
+| `app/parser.js` | Turns what you said into an entry: numbers, type, account, category, note |
+| `app/vocabulary.js` | The words Piso listens for. Edit this one to teach it yours |
+| `app/sw.js`, `app/manifest.json` | Offline cache and install details |
+| `backend/Code.gs` | The Apps Script web app: saves, undoes, skips duplicates, builds the tabs |
+| `tests/` | Parser cases, and the backend run against a fake in-memory sheet |
+| `scripts/` | Live backend check, the CSV audit, and the screenshot generator |
+| `.github/workflows/ci.yml` | Runs the tests, then publishes `app/` to GitHub Pages |
 
 ## Tests
-Needs [Node.js](https://nodejs.org) 20+, no installs.
 
-- `npm test`: the parser cases in `tests/parser.test.js`, plus `Code.gs` run against a fake in-memory sheet
-  (`tests/backend.test.js`). GitHub runs these on every push (the **Actions** tab).
-- `npm run smoke`: a live check of the deployed backend. It adds a ₱1 test entry and removes it by its ID.
-  Set `PISO_URL` and `PISO_TOKEN` first (see `scripts/smoke.mjs`).
-- `npm run audit -- "<Transactions.csv>"`: download the Transactions tab as CSV, and this re-parses
-  everything you've said and lists every entry you had to correct. Each one is a good new test case.
+Needs [Node.js](https://nodejs.org) 20 or newer. Nothing to install.
 
-## Updating the backend
-After changing `Code.gs`, push it and point the existing deployment at a new version, so the URL stays the same:
+```
+npm test                 # parser cases + backend against a fake sheet
+npm run smoke            # live check of your deployed backend (adds a ₱1 entry, then removes it)
+npm run screenshots      # regenerates the pictures in docs/ (needs Chrome)
+```
+
+`npm run smoke` reads the URL and token from `PISO_URL` and `PISO_TOKEN`, so they never end up in the repo. GitHub runs `npm test` on every push.
+
+### Updating the backend
 
 ```
 clasp push
-clasp redeploy <deployment id> --description "what changed"
+clasp update-deployment <deployment id> --description "what changed"
 ```
 
-To change the token, edit `TOKEN` in **Project Settings → Script Properties**, then update it in the app's Settings.
+Updating the existing deployment keeps the Web app URL the same, so the phone needs no changes.
 
-## Good to know
-- Anyone with your Web app URL **and** token can write to your sheet. Keep both private.
-- Speech recognition needs internet and occasionally mishears numbers. That's why the confirm card exists.
-- Chrome writes "plus 500" as "+ 500" and "minus 29" as "-29". Piso reads both.
+## License
 
-## Later: migrating to a full app
-The `{type, amount, account, category, note}` shape and the parser are reusable. Swap the Apps Script URL for Supabase or Firebase when you outgrow Sheets.
+Copyright © 2026 [ChimCatz](https://github.com/ChimCatz). Released under the [MIT License](LICENSE).
+
+---
+
+<p align="center">
+  Built by <a href="https://github.com/ChimCatz">ChimCatz</a> ·
+  part of the <a href="https://github.com/ChimCatz/cz-portfolio-site">project portfolio</a>
+</p>
