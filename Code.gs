@@ -35,6 +35,12 @@ function getSheet_() {
   return sh;
 }
 
+// Text starting with = + - @ would be parsed as a formula ("+ 500 into gcash" -> #ERROR!).
+function text_(v) {
+  const s = String(v || '');
+  return /^[=+\-@]/.test(s) ? "'" + s : s;
+}
+
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
@@ -70,10 +76,10 @@ function doPost(e) {
         Utilities.formatDate(now, tz, 'HH:mm:ss'),
         t.type,
         amount,
-        String(t.account || ''),
-        String(t.category || ''),
-        String(t.note || ''),
-        String(t.raw || '')
+        text_(t.account),
+        text_(t.category),
+        text_(t.note),
+        text_(t.raw)
       ]);
       return json_({ ok: true });
     }
@@ -132,9 +138,10 @@ function setupSheets() {
     'group by F label sum(D) \'Total\'",1),"No data yet")'
   );
   sum.getRange('D1').setValue('Month totals').setFontWeight('bold');
-  sum.getRange('D2:E3').setFormulas([
-    ['Income',  '=SUMIFS(Transactions!D:D,Transactions!C:C,"Income",Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))'],
-    ['Expense', '=SUMIFS(Transactions!D:D,Transactions!C:C,"Expense",Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))']
+  sum.getRange('D2:D3').setValues([['Income'], ['Expense']]);
+  sum.getRange('E2:E3').setFormulas([
+    ['=SUMIFS(Transactions!D:D,Transactions!C:C,"Income",Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))'],
+    ['=SUMIFS(Transactions!D:D,Transactions!C:C,"Expense",Transactions!A:A,">="&(EOMONTH(TODAY(),-1)+1))']
   ]);
   sum.getRange('E2:E3').setNumberFormat('#,##0.00');
 

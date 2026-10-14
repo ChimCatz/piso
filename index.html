@@ -154,7 +154,10 @@ function parseCommand(raw) {
 
   // type
   let type = 'Expense', typeFound = false;
-  for (const w of words) {
+  // Chrome often turns "plus 500" / "minus 29" into "+ 500" / "-29"
+  if (/(^|\s)\+\s*\d/.test(text)) { type = 'Income'; typeFound = true; }
+  else if (/(^|\s)[-−–]\s*\d/.test(text)) { type = 'Expense'; typeFound = true; }
+  if (!typeFound) for (const w of words) {
     if (INCOME_WORDS.includes(w)) { type = 'Income'; typeFound = true; break; }
     if (EXPENSE_WORDS.includes(w)) { type = 'Expense'; typeFound = true; break; }
   }
@@ -325,6 +328,12 @@ $('typedForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const v = $('typed').value.trim();
   if (v) { showConfirm(parseCommand(v)); $('typed').value = ''; }
+});
+$('fType').addEventListener('change', () => {
+  // keep the fallback category in step when the type is switched by hand
+  const c = $('fCategory');
+  if ($('fType').value === 'Income' && c.value === 'Other') c.value = 'Other Income';
+  if ($('fType').value === 'Expense' && c.value === 'Other Income') c.value = 'Other';
 });
 $('saveBtn').addEventListener('click', saveEntry);
 $('cancelBtn').addEventListener('click', () => { $('confirm').classList.add('hidden'); $('hint').textContent = 'Cancelled'; });
